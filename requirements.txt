@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+spotipy
+python-dotenv
+python-barcode
+Pillow
