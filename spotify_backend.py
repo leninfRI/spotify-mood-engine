@@ -1,4 +1,4 @@
-#V0.6
+#V0.7
 import os
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
@@ -31,13 +31,30 @@ if not client_id or not client_secret:
     print("[重大錯誤] 找不到 Spotify API 金鑰。")
     sp = None
 else:
-    # [FIX] 移除了代理伺服器相關設定
     print("[INFO] 正在使用直接連線模式初始化 Spotify。")
     auth_manager = SpotifyClientCredentials(
         client_id=client_id, 
         client_secret=client_secret
     )
     sp = spotipy.Spotify(auth_manager=auth_manager)
+
+    # [NEW] 在日誌中顯示獲取到的 Access Token 詳細資訊
+    try:
+        token_info = auth_manager.get_access_token(as_dict=True)
+        access_token = token_info['access_token']
+        token_type = token_info['token_type']
+        expires_in = token_info['expires_in']
+        
+        print("--- Spotify Access Token ---")
+        print(f"[INFO] 成功獲取 Access Token。")
+        # 為了安全，只顯示部分 token
+        print(f"[INFO] access_token: {access_token[:8]}...") 
+        print(f"[INFO] token_type: {token_type}")
+        print(f"[INFO] expires_in: {expires_in} 秒 (約 {expires_in/60:.1f} 分鐘)")
+        print("----------------------------")
+    except Exception as e:
+        print(f"[警告] 無法獲取或顯示 Access Token 詳細資訊: {e}")
+
 
 # --- Pydantic Models ---
 class PlaylistRequest(BaseModel):
