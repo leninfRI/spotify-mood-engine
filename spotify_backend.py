@@ -1,4 +1,4 @@
-#V0.3
+#V0.4
 import os
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
@@ -9,6 +9,7 @@ import io
 from fastapi.responses import StreamingResponse
 import barcode
 from barcode.writer import ImageWriter
+from urllib.parse import urlparse # [NEW] 引入 URL 解析工具
 
 # --- FastAPI App & CORS ---
 app = FastAPI()
@@ -71,9 +72,18 @@ def analyze_playlist(request: PlaylistRequest):
         raise HTTPException(status_code=500, detail="Spotify 服務未正確初始化。")
 
     try:
-        playlist_id = request.playlist_url.split("/")[-1].split("?")[0]
+        # [FIX] 使用更穩健的方式來提取歌單 ID
+        parsed_url = urlparse(request.playlist_url)
+        path_parts = parsed_url.path.split('/')
         
-        # [FIX] 第一階段：先嘗試獲取歌單基本資訊
+        if 'playlist' in path_parts and len(path_parts) > path_parts.index('playlist') + 1:
+            playlist_id = path_parts[path_parts.index('playlist') + 1]
+        else:
+            raise HTTPException(status_code=400, detail="無效的 Spotify 歌單網址格式。")
+        
+        print(f"[偵錯] 提取到的 Playlist ID: {playlist_id}")
+
+        # 第一階段：先嘗試獲取歌單基本資訊
         try:
             playlist_info = sp.playlist(playlist_id, market="TW")
         except spotipy.exceptions.SpotifyException as e:
@@ -82,7 +92,7 @@ def analyze_playlist(request: PlaylistRequest):
             else:
                 raise e
 
-        # [FIX] 第二階段：再獲取歌單中的所有曲目
+        # 第二階段：再獲取歌單中的所有曲目
         results = sp.playlist_tracks(playlist_id, market="TW")
         tracks = results['items']
         
