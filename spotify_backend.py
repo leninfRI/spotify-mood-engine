@@ -1,3 +1,4 @@
+#V0.2
 import os
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
@@ -53,14 +54,9 @@ def analyze_mood(avg_valence, avg_energy):
 
 def convert_mood_to_discount(avg_valence, avg_energy):
     """將心情指數轉換為折扣百分比"""
-    # 這是一個範例公式：Valence 越低，基礎折扣越高
-    # Energy 越高，額外折扣越高
-    base_discount = (1 - avg_valence) * 15  # 最高 15%
-    energy_bonus = avg_energy * 5         # 最高 5%
-    
+    base_discount = (1 - avg_valence) * 15
+    energy_bonus = avg_energy * 5
     total_discount = base_discount + energy_bonus
-    
-    # 確保折扣在 5% 到 20% 之間
     final_discount = max(5.0, min(total_discount, 20.0))
     return round(final_discount, 2)
 
@@ -77,7 +73,8 @@ def analyze_playlist(request: PlaylistRequest):
     try:
         playlist_id = request.playlist_url.split("/")[-1].split("?")[0]
         
-        results = sp.playlist_tracks(playlist_id)
+        # [FIX] 加入 market="TW" 參數，確保能讀取台灣地區的歌單
+        results = sp.playlist_tracks(playlist_id, market="TW")
         tracks = results['items']
         
         while results['next']:
@@ -92,6 +89,7 @@ def analyze_playlist(request: PlaylistRequest):
         audio_features = []
         for i in range(0, len(track_ids), 100):
             batch = track_ids[i:i+100]
+            # [FIX] 獲取音訊特徵時也加入 market="TW"
             audio_features.extend(sp.audio_features(batch))
 
         valid_features = [f for f in audio_features if f]
@@ -107,13 +105,15 @@ def analyze_playlist(request: PlaylistRequest):
         mood = analyze_mood(avg_valence, avg_energy)
         discount = convert_mood_to_discount(avg_valence, avg_energy)
 
+        playlist_info = sp.playlist(playlist_id, market="TW")
+
         return {
-            "playlist_name": sp.playlist(playlist_id)['name'],
+            "playlist_name": playlist_info['name'],
             "total_tracks": len(valid_features),
             "mood": mood,
             "avg_valence": round(avg_valence, 3),
             "avg_energy": round(avg_energy, 3),
-            "discount_percentage": discount, # 新增的折扣欄位
+            "discount_percentage": discount,
             "tracks_details": [
                 {
                     "name": item['track']['name'],
@@ -125,7 +125,10 @@ def analyze_playlist(request: PlaylistRequest):
         }
 
     except spotipy.exceptions.SpotifyException as e:
-        raise HTTPException(status_code=400, detail="無效的 Spotify 歌單網址或 API 錯誤。")
+        # 提供更詳細的錯誤訊息
+        if e.http_status == 404:
+            raise HTTPException(status_code=404, detail="找不到這個歌單，請確認網址是否正確，或該歌單是否為公開。")
+        raise HTTPException(status_code=400, detail=f"Spotify API 錯誤: {e.msg}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"伺服器內部錯誤: {e}")
 
@@ -133,19 +136,11 @@ def analyze_playlist(request: PlaylistRequest):
 def generate_barcode(request: BarcodeRequest):
     """根據提供的折扣碼文字，產生 Barcode 圖片"""
     try:
-        # 使用 Code128 格式，這是零售業最常見的格式
         EAN = barcode.get_barcode_class('code128')
-        
-        # 產生條碼，但不寫入檔案，而是寫入記憶體
         image_buffer = io.BytesIO()
         EAN(request.discount_code, writer=ImageWriter()).write(image_buffer)
-        
-        # 將指標移至開頭，準備讀取
         image_buffer.seek(0)
-        
-        # 以圖片串流的方式回傳
         return StreamingResponse(image_buffer, media_type="image/png")
-        
     except Exception as e:
         print(f"產生 Barcode 時發生錯誤: {e}")
         raise HTTPException(status_code=500, detail="無法產生 Barcode。")
