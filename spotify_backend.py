@@ -1,4 +1,4 @@
-#0.5
+#V0.6
 import os
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
