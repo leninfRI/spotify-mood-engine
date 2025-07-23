@@ -1,4 +1,4 @@
-#V0.7
+#V0.8
 import os
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
@@ -14,12 +14,13 @@ from urllib.parse import urlparse
 # --- FastAPI App & CORS ---
 app = FastAPI()
 
+# 確保 CORS 中介層能正確處理所有請求
 origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -27,19 +28,16 @@ app.add_middleware(
 client_id = os.environ.get('SPOTIPY_CLIENT_ID')
 client_secret = os.environ.get('SPOTIPY_CLIENT_SECRET')
 
+sp = None
 if not client_id or not client_secret:
-    print("[重大錯誤] 找不到 Spotify API 金鑰。")
-    sp = None
+    print("[重大錯誤] 找不到 Spotify API 金鑰。請在 Railway 環境變數中設定 SPOTIPY_CLIENT_ID 和 SPOTIPY_CLIENT_SECRET。")
 else:
-    print("[INFO] 正在使用直接連線模式初始化 Spotify。")
-    auth_manager = SpotifyClientCredentials(
-        client_id=client_id, 
-        client_secret=client_secret
-    )
-    sp = spotipy.Spotify(auth_manager=auth_manager)
-
-    # [NEW] 在日誌中顯示獲取到的 Access Token 詳細資訊
     try:
+        print("[INFO] 正在使用金鑰初始化 Spotify...")
+        auth_manager = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+        sp = spotipy.Spotify(auth_manager=auth_manager)
+
+        # [NEW] 獲取並在日誌中顯示 Access Token 詳細資訊
         token_info = auth_manager.get_access_token(as_dict=True)
         access_token = token_info['access_token']
         token_type = token_info['token_type']
@@ -53,7 +51,8 @@ else:
         print(f"[INFO] expires_in: {expires_in} 秒 (約 {expires_in/60:.1f} 分鐘)")
         print("----------------------------")
     except Exception as e:
-        print(f"[警告] 無法獲取或顯示 Access Token 詳細資訊: {e}")
+        print(f"[重大錯誤] Spotify 初始化失敗: {e}")
+        sp = None
 
 
 # --- Pydantic Models ---
@@ -65,12 +64,18 @@ class BarcodeRequest(BaseModel):
 
 # --- Mood & Discount Engine ---
 def analyze_mood(avg_valence, avg_energy):
-    if avg_valence >= 0.5 and avg_energy >= 0.5: return "快樂 / 充滿活力"
-    if avg_valence >= 0.5 and avg_energy < 0.5: return "平靜 / 療癒"
-    if avg_valence < 0.5 and avg_energy >= 0.5: return "憤怒 / 激昂"
-    return "悲傷 / 憂鬱"
+    """根據平均 valence 和 energy 判斷情緒象限"""
+    if avg_valence >= 0.5 and avg_energy >= 0.5:
+        return "快樂 / 充滿活力"
+    elif avg_valence >= 0.5 and avg_energy < 0.5:
+        return "平靜 / 療癒"
+    elif avg_valence < 0.5 and avg_energy >= 0.5:
+        return "憤怒 / 激昂"
+    else:
+        return "悲傷 / 憂鬱"
 
 def convert_mood_to_discount(avg_valence, avg_energy):
+    """將心情指數轉換為折扣百分比"""
     base_discount = (1 - avg_valence) * 15
     energy_bonus = avg_energy * 5
     total_discount = base_discount + energy_bonus
@@ -85,9 +90,10 @@ def read_root():
 @app.post("/api/analyze-playlist")
 def analyze_playlist(request: PlaylistRequest):
     if not sp:
-        raise HTTPException(status_code=500, detail="Spotify 服務未正確初始化。")
+        raise HTTPException(status_code=503, detail="Spotify 服務未正確初始化，請檢查伺服器金鑰設定。")
 
     try:
+        # 使用更穩健的方式來提取歌單 ID
         parsed_url = urlparse(request.playlist_url)
         path_parts = parsed_url.path.split('/')
         
@@ -98,14 +104,16 @@ def analyze_playlist(request: PlaylistRequest):
         
         print(f"[偵錯] 提取到的 Playlist ID: {playlist_id}")
 
+        # 第一階段：先嘗試獲取歌單基本資訊
         try:
             playlist_info = sp.playlist(playlist_id, market="TW")
         except spotipy.exceptions.SpotifyException as e:
             if e.http_status == 404:
-                raise HTTPException(status_code=404, detail="找不到這個歌單，請確認網址是否正確、歌單是否為公開。")
+                raise HTTPException(status_code=404, detail="找不到這個歌單，請確認網址是否正確、歌單是否為公開，或該歌單是否受地區限制。")
             else:
                 raise e
 
+        # 第二階段：再獲取歌單中的所有曲目
         results = sp.playlist_tracks(playlist_id, market="TW")
         tracks = results['items']
         
@@ -160,6 +168,7 @@ def analyze_playlist(request: PlaylistRequest):
 
 @app.post("/api/generate-barcode")
 def generate_barcode(request: BarcodeRequest):
+    """根據提供的折扣碼文字，產生 Barcode 圖片"""
     try:
         EAN = barcode.get_barcode_class('code128')
         image_buffer = io.BytesIO()
