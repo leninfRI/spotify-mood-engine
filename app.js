@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // [!!!] 最關鍵的設定點 [!!!]
     // 請將此處的網址，換成您在 Render 上為 "Spotify 專案" 部署的真實公開網址！
-    const API_BASE_URL = "https://spotify-mood-service.onrender.com/"; // <--- 請務必修改這裡！
+    const API_BASE_URL = "https://spotify-mood-service.onrender.com"; // <--- 請務必修改這裡！
     
     playlistForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const playlistUrl = playlistUrlInput.value;
+            // [FIX] 修正了 API 的路徑組合，移除多餘的斜線
             const response = await fetch(`${API_BASE_URL}/api/analyze-playlist`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
