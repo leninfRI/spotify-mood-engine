@@ -1,4 +1,4 @@
-#V0.2
+#V0.3
 import os
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
@@ -73,7 +73,16 @@ def analyze_playlist(request: PlaylistRequest):
     try:
         playlist_id = request.playlist_url.split("/")[-1].split("?")[0]
         
-        # [FIX] 加入 market="TW" 參數，確保能讀取台灣地區的歌單
+        # [FIX] 第一階段：先嘗試獲取歌單基本資訊
+        try:
+            playlist_info = sp.playlist(playlist_id, market="TW")
+        except spotipy.exceptions.SpotifyException as e:
+            if e.http_status == 404:
+                raise HTTPException(status_code=404, detail="找不到這個歌單，請確認網址是否正確，或該歌單是否為公開。")
+            else:
+                raise e
+
+        # [FIX] 第二階段：再獲取歌單中的所有曲目
         results = sp.playlist_tracks(playlist_id, market="TW")
         tracks = results['items']
         
@@ -89,7 +98,6 @@ def analyze_playlist(request: PlaylistRequest):
         audio_features = []
         for i in range(0, len(track_ids), 100):
             batch = track_ids[i:i+100]
-            # [FIX] 獲取音訊特徵時也加入 market="TW"
             audio_features.extend(sp.audio_features(batch))
 
         valid_features = [f for f in audio_features if f]
@@ -104,8 +112,6 @@ def analyze_playlist(request: PlaylistRequest):
 
         mood = analyze_mood(avg_valence, avg_energy)
         discount = convert_mood_to_discount(avg_valence, avg_energy)
-
-        playlist_info = sp.playlist(playlist_id, market="TW")
 
         return {
             "playlist_name": playlist_info['name'],
@@ -125,9 +131,6 @@ def analyze_playlist(request: PlaylistRequest):
         }
 
     except spotipy.exceptions.SpotifyException as e:
-        # 提供更詳細的錯誤訊息
-        if e.http_status == 404:
-            raise HTTPException(status_code=404, detail="找不到這個歌單，請確認網址是否正確，或該歌單是否為公開。")
         raise HTTPException(status_code=400, detail=f"Spotify API 錯誤: {e.msg}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"伺服器內部錯誤: {e}")
