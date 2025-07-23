@@ -1,3 +1,4 @@
+//V0.3
 document.addEventListener('DOMContentLoaded', () => {
     // 檢查函式庫
     if (typeof JsBarcode === 'undefined') {
