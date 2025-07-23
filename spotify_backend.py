@@ -1,4 +1,4 @@
-#V0.4
+#0.5
 import os
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
@@ -9,7 +9,7 @@ import io
 from fastapi.responses import StreamingResponse
 import barcode
 from barcode.writer import ImageWriter
-from urllib.parse import urlparse # [NEW] 引入 URL 解析工具
+from urllib.parse import urlparse
 
 # --- FastAPI App & CORS ---
 app = FastAPI()
@@ -31,7 +31,12 @@ if not client_id or not client_secret:
     print("[重大錯誤] 找不到 Spotify API 金鑰。")
     sp = None
 else:
-    auth_manager = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+    # [FIX] 移除了代理伺服器相關設定
+    print("[INFO] 正在使用直接連線模式初始化 Spotify。")
+    auth_manager = SpotifyClientCredentials(
+        client_id=client_id, 
+        client_secret=client_secret
+    )
     sp = spotipy.Spotify(auth_manager=auth_manager)
 
 # --- Pydantic Models ---
@@ -43,18 +48,12 @@ class BarcodeRequest(BaseModel):
 
 # --- Mood & Discount Engine ---
 def analyze_mood(avg_valence, avg_energy):
-    """根據平均 valence 和 energy 判斷情緒象限"""
-    if avg_valence >= 0.5 and avg_energy >= 0.5:
-        return "快樂 / 充滿活力"
-    elif avg_valence >= 0.5 and avg_energy < 0.5:
-        return "平靜 / 療癒"
-    elif avg_valence < 0.5 and avg_energy >= 0.5:
-        return "憤怒 / 激昂"
-    else:
-        return "悲傷 / 憂鬱"
+    if avg_valence >= 0.5 and avg_energy >= 0.5: return "快樂 / 充滿活力"
+    if avg_valence >= 0.5 and avg_energy < 0.5: return "平靜 / 療癒"
+    if avg_valence < 0.5 and avg_energy >= 0.5: return "憤怒 / 激昂"
+    return "悲傷 / 憂鬱"
 
 def convert_mood_to_discount(avg_valence, avg_energy):
-    """將心情指數轉換為折扣百分比"""
     base_discount = (1 - avg_valence) * 15
     energy_bonus = avg_energy * 5
     total_discount = base_discount + energy_bonus
@@ -72,7 +71,6 @@ def analyze_playlist(request: PlaylistRequest):
         raise HTTPException(status_code=500, detail="Spotify 服務未正確初始化。")
 
     try:
-        # [FIX] 使用更穩健的方式來提取歌單 ID
         parsed_url = urlparse(request.playlist_url)
         path_parts = parsed_url.path.split('/')
         
@@ -83,16 +81,14 @@ def analyze_playlist(request: PlaylistRequest):
         
         print(f"[偵錯] 提取到的 Playlist ID: {playlist_id}")
 
-        # 第一階段：先嘗試獲取歌單基本資訊
         try:
             playlist_info = sp.playlist(playlist_id, market="TW")
         except spotipy.exceptions.SpotifyException as e:
             if e.http_status == 404:
-                raise HTTPException(status_code=404, detail="找不到這個歌單，請確認網址是否正確，或該歌單是否為公開。")
+                raise HTTPException(status_code=404, detail="找不到這個歌單，請確認網址是否正確、歌單是否為公開。")
             else:
                 raise e
 
-        # 第二階段：再獲取歌單中的所有曲目
         results = sp.playlist_tracks(playlist_id, market="TW")
         tracks = results['items']
         
@@ -147,7 +143,6 @@ def analyze_playlist(request: PlaylistRequest):
 
 @app.post("/api/generate-barcode")
 def generate_barcode(request: BarcodeRequest):
-    """根據提供的折扣碼文字，產生 Barcode 圖片"""
     try:
         EAN = barcode.get_barcode_class('code128')
         image_buffer = io.BytesIO()
